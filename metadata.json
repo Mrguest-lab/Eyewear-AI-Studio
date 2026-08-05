@@ -1,0 +1,6 @@
+{
+  "name": "Image Resizer & Marketplace Optimizer",
+  "description": "High-performance bulk and single image resizer, converter, and optimizer with e-commerce marketplace presets (Amazon, Shopify, Etsy, eBay, Social).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
