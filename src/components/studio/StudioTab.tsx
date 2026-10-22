@@ -28,6 +28,7 @@ import { buildProductViewPrompt, buildRelightPrompt } from '../../lib/prompts';
 import type { ProductView } from '../../lib/prompts';
 import { generate, loadOutput, removeBackground, upscale as aiUpscale } from '../../lib/browser/aiClient';
 import { presetRatioLabel } from '../../lib/marketplacePresets';
+import { describeProgress, localRemoveBackground, localUpscale } from '../../lib/browser/localAi';
 import { Btn, CompareView, FilePicker, Notice, Panel, Select, Slider, Stat, ValidationReport, errorMessage, useBlobUrl, useRasterUrl, checkerStyle } from './ui';
 import { DEFAULT_RESOLUTION, ResolutionPicker, resolveSize } from './ResolutionPicker';
 import type { ResolutionValue } from './ResolutionPicker';
@@ -68,7 +69,7 @@ export const StudioTab: React.FC<TabProps> = ({ work, setWork, goTo }) => {
   const [wbOpts, setWbOpts] = useState<WhiteBackgroundOptions>({ tolerance: 38, feather: 1, shadow: 0.5, speckMaxFraction: 0.0004, output: 'white' });
   const [resolution, setResolution] = useState<ResolutionValue>(DEFAULT_RESOLUTION);
   const [fit, setFit] = useState<FitStrategy>('contain');
-  const [upscaleMethod, setUpscaleMethod] = useState<'lanczos' | 'ai'>('lanczos');
+  const [upscaleMethod, setUpscaleMethod] = useState<'lanczos' | 'local-ai' | 'ai'>('lanczos');
   const [presets] = usePresets();
   const [presetId, setPresetId] = useState('amazon-main');
   const [exported, setExported] = useState<ExportOutcome | null>(null);
@@ -159,11 +160,17 @@ export const StudioTab: React.FC<TabProps> = ({ work, setWork, goTo }) => {
       const { width, height } = resolveSize(value);
       let src = current!.image;
       let label = '';
+      const needed = Math.max(width / src.width, height / src.height);
+      if (upscaleMethod === 'local-ai' && needed > 1.01) {
+        const scale: 2 | 4 = needed > 2 ? 4 : 2;
+        const res = await localUpscale(src, scale, (p) => setBusy(describeProgress(p)));
+        label = `Free on-device AI super-resolution (Swin2SR ×${scale}, ${res.device === 'webgpu' ? 'GPU' : 'CPU'}: ${src.width}×${src.height} → ${res.image.width}×${res.image.height}), then Lanczos-3 to ${width}×${height}`;
+        src = res.image;
+      }
       if (upscaleMethod === 'ai') {
         if (!providerReady({ provider: 'replicate', consent: true }, ai.providers)) {
           throw new Error('AI upscaling needs the Replicate provider on your AI backend (see Settings). Use Lanczos for free local resizing.');
         }
-        const needed = Math.max(width / src.width, height / src.height);
         const scale: 2 | 4 = needed > 2 ? 4 : 2;
         const enc = await encodeImage(src, { format: 'png' });
         const dataUrl = enc.blob.size < 12 * 1024 * 1024 ? await blobToDataUrl(enc.blob) : await referenceForAI(src, 3000, 'jpeg');
@@ -179,7 +186,7 @@ export const StudioTab: React.FC<TabProps> = ({ work, setWork, goTo }) => {
             ? `Classical upscale ×${placement.scale.toFixed(2)} (Lanczos-3, not AI) to ${width}×${height}`
             : `Resized to ${width}×${height} (Lanczos-3)`;
       }
-      push(image, label, upscaleMethod === 'ai' ? 'ai' : 'local');
+      push(image, label, upscaleMethod === 'lanczos' ? 'local' : 'ai');
       setNotes([
         ...placement.notes,
         placement.scale > 1.005 ? 'Upscaling interpolates pixels. It does not recover photographic detail that was not captured.' : ''
@@ -225,6 +232,16 @@ export const StudioTab: React.FC<TabProps> = ({ work, setWork, goTo }) => {
       );
       const { loaded } = await loadOutput(ai.settings, res.images[0].src, 'relit.png');
       push(loaded.image, `AI relight (${res.provider} ${res.model}) — generative, check product details`, 'ai');
+    });
+
+  const doLocalBgRemoval = () =>
+    run('Free AI background removal', async () => {
+      const res = await localRemoveBackground(current!.image, (p) => setBusy(describeProgress(p)));
+      const out =
+        wbOpts.output === 'transparent'
+          ? res.image
+          : (await runPixelOp<{ image: RGBAImage }>({ op: 'render', image: res.image, options: { width: res.image.width, height: res.image.height, strategy: 'contain', background: '#FFFFFF' } })).image;
+      push(out, `Free on-device AI background removal (BiRefNet-lite, ${res.device === 'webgpu' ? 'GPU' : 'CPU'}) → ${wbOpts.output === 'transparent' ? 'transparent' : 'white'}`, 'ai');
     });
 
   const doAiBgRemoval = () =>
@@ -396,18 +413,34 @@ export const StudioTab: React.FC<TabProps> = ({ work, setWork, goTo }) => {
           <Slider label="Studio contact shadow" value={wbOpts.shadow ?? 0} min={0} max={1} step={0.05} onChange={(v) => setWbOpts({ ...wbOpts, shadow: v })} />
           <Select label="Output" value={wbOpts.output ?? 'white'} onChange={(v) => setWbOpts({ ...wbOpts, output: v })} options={[{ value: 'white', label: 'Pure white #FFFFFF' }, { value: 'transparent', label: 'Transparent (PNG / WebP)' }]} />
           <Btn variant="primary" className="w-full" onClick={doWhiteBg} disabled={!!busy}>Create white background</Btn>
-          <p className="text-[11px] text-[#ececec]/45">Works on plain studio backdrops. Clear lenses enclosed by the frame are kept. For busy backgrounds use AI background removal below.</p>
+          <Btn variant="ai" className="w-full" onClick={doLocalBgRemoval} disabled={!!busy}>Free AI background removal (on-device)</Btn>
+          <p className="text-[11px] text-[#ececec]/45">
+            Classic cleanup works on plain studio backdrops and keeps clear lenses enclosed by the frame. For busy backgrounds use the free AI
+            removal (BiRefNet-lite, MIT licence): runs in your browser, first use downloads ~224 MB once. Check tinted or clear lenses
+            afterwards — AI masks can treat see-through lenses as background.
+          </p>
         </Panel>
 
         <Panel title="3 · Resolution & upscaling">
           <ResolutionPicker value={resolution} onChange={setResolution} />
           <div className="grid grid-cols-2 gap-2">
             <Select label="Fit" value={fit} onChange={setFit} options={[{ value: 'contain', label: 'Fit whole image (pad)' }, { value: 'product', label: 'Center product (pad)' }, { value: 'cover', label: 'Fill (crop background only)' }]} />
-            <Select label="Upscale method" value={upscaleMethod} onChange={setUpscaleMethod} options={[{ value: 'lanczos', label: 'Lanczos-3 (free, local, not AI)' }, { value: 'ai', label: 'AI super-resolution (Real-ESRGAN)' }]} />
+            <Select
+              label="Upscale method"
+              value={upscaleMethod}
+              onChange={setUpscaleMethod}
+              options={[
+                { value: 'lanczos', label: 'Lanczos-3 (free, instant, not AI)' },
+                { value: 'local-ai', label: 'AI Swin2SR (free, on-device)' },
+                { value: 'ai', label: 'AI Real-ESRGAN (server, paid)' }
+              ]}
+            />
           </div>
           <p className="text-[11px] text-[#ececec]/50">
             Current {current.image.width}×{current.image.height} → target {resolveSize(resolution).width}×{resolveSize(resolution).height}.
             {upscaleMethod === 'lanczos' ? ' Lanczos interpolates; it cannot add real detail.' : ' AI upscaling synthesises plausible detail; it is not a recovery of the original photo.'}
+            {upscaleMethod === 'local-ai' &&
+              ' Runs in this browser for free: first use downloads a ~21–54 MB model (cached afterwards). Fast with a GPU (Chrome/Edge WebGPU); large images can take several minutes on CPU.'}
           </p>
           <Btn className="w-full" onClick={() => doUpscale()} disabled={!!busy}>Resize / upscale to target</Btn>
         </Panel>
