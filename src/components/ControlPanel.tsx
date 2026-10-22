@@ -280,7 +280,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                 desc: 'Add background canvas padding (Ideal for Marketplaces)'
               },
               { id: 'cover', label: 'Crop (Cover)', desc: 'Crop overflow to fill box' },
-              { id: 'stretch', label: 'Stretch', desc: 'Stretch to exact dimensions' },
+              { id: 'stretch', label: 'Stretch ⚠', desc: 'Distorts the product — avoid for listings' },
               { id: 'maxBounds', label: 'Max Bounds', desc: 'Downscale only if larger' }
             ].map((strategy) => (
               <button

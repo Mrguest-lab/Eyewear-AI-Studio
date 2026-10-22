@@ -1,4 +1,5 @@
-import { OutputFormat, ResizeOptions } from '../types';
+import type { OutputFormat, ResizeOptions } from '../types';
+import { formatFromMime, sniffFormat } from '../lib/format';
 
 /**
  * Loads an image file, blob, or URL into an HTMLImageElement
@@ -293,17 +294,25 @@ export async function processImage(
 }
 
 /**
- * Helper to promise-ify canvas.toBlob
+ * Helper to promise-ify canvas.toBlob. Browsers silently fall back to PNG for
+ * formats they cannot encode (e.g. AVIF), so the result is checked by magic bytes.
  */
-function canvasToBlob(canvas: HTMLCanvasElement, format: OutputFormat, quality: number): Promise<Blob> {
-  return new Promise((resolve, reject) => {
+async function canvasToBlob(canvas: HTMLCanvasElement, format: OutputFormat, quality: number): Promise<Blob> {
+  const blob = await new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(
-      (blob) => {
-        if (blob) resolve(blob);
+      (b) => {
+        if (b) resolve(b);
         else reject(new Error('Canvas export failed'));
       },
       format,
       quality
     );
   });
+  const actual = sniffFormat(new Uint8Array(await blob.slice(0, 16).arrayBuffer()));
+  if (actual !== formatFromMime(format)) {
+    throw new Error(
+      `This browser cannot encode ${getExtensionForFormat(format).toUpperCase()} (it produced ${actual ? actual.toUpperCase() : 'unknown data'}). Choose another format.`
+    );
+  }
+  return blob;
 }

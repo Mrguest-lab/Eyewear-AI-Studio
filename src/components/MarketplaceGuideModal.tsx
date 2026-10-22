@@ -32,6 +32,10 @@ export const MarketplaceGuideModal: React.FC<MarketplaceGuideModalProps> = ({
               <p className="text-[11px] text-[#ececec]/50 mt-0.5">
                 Flipkart, Nykaa, Myntra, Ajio, Blinkit, Instamart, Zepto, Amazon, Shopify & Marketplace Guidelines.
               </p>
+              <p className="text-[11px] text-amber-300/90 mt-1">
+                Quick reference values only — not verified current requirements. Check each marketplace's latest seller guidelines; editable
+                rules live in the Presets tab.
+              </p>
             </div>
           </div>
 
