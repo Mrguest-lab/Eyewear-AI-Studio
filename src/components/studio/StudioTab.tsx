@@ -241,7 +241,7 @@ export const StudioTab: React.FC<TabProps> = ({ work, setWork, goTo }) => {
         wbOpts.output === 'transparent'
           ? res.image
           : (await runPixelOp<{ image: RGBAImage }>({ op: 'render', image: res.image, options: { width: res.image.width, height: res.image.height, strategy: 'contain', background: '#FFFFFF' } })).image;
-      push(out, `Free on-device AI background removal (BiRefNet-lite, ${res.device === 'webgpu' ? 'GPU' : 'CPU'}) → ${wbOpts.output === 'transparent' ? 'transparent' : 'white'}`, 'ai');
+      push(out, `Free on-device AI background removal (ormbg, ${res.device === 'webgpu' ? 'GPU' : 'CPU'}) → ${wbOpts.output === 'transparent' ? 'transparent' : 'white'}`, 'ai');
     });
 
   const doAiBgRemoval = () =>
@@ -416,8 +416,8 @@ export const StudioTab: React.FC<TabProps> = ({ work, setWork, goTo }) => {
           <Btn variant="ai" className="w-full" onClick={doLocalBgRemoval} disabled={!!busy}>Free AI background removal (on-device)</Btn>
           <p className="text-[11px] text-[#ececec]/45">
             Classic cleanup works on plain studio backdrops and keeps clear lenses enclosed by the frame. For busy backgrounds use the free AI
-            removal (BiRefNet-lite, MIT licence): runs in your browser, first use downloads ~224 MB once. Check tinted or clear lenses
-            afterwards — AI masks can treat see-through lenses as background.
+            removal (ormbg, Apache-2.0 licence): runs in your browser, first use downloads ~44 MB once, then ~10–30 s per image. Check
+            tinted or clear lenses afterwards — AI masks can treat see-through lenses as background.
           </p>
         </Panel>
 

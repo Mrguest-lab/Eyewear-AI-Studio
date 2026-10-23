@@ -1,6 +1,6 @@
 // Free, on-device AI (no server, no API key): runs open-source ONNX models in a
 // Web Worker with transformers.js (WebGPU when available, otherwise WebAssembly).
-//  - Background removal: BiRefNet-lite (MIT licence)
+//  - Background removal: ormbg / ISNet (Apache-2.0), quantized
 //  - Super-resolution:   Swin2SR ×2 classical / ×4 real-world (Apache-2.0)
 // Models are downloaded once from the Hugging Face CDN and cached by the browser.
 
@@ -10,7 +10,7 @@ import { resample } from '../resample.ts';
 const TRANSFORMERS_URL = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1';
 
 export const LOCAL_MODELS = {
-  removeBackground: { id: 'onnx-community/BiRefNet_lite-ONNX', sizeMB: { fp16: 115, fp32: 224 } },
+  removeBackground: { id: 'onnx-community/ormbg-ONNX', sizeMB: { uint8: 44 } },
   upscale2: { id: 'Xenova/swin2SR-classical-sr-x2-64', sizeMB: { q8: 21, fp32: 54 } },
   upscale4: { id: 'Xenova/swin2SR-realworld-sr-x4-64-bsrgan-psnr', sizeMB: { q8: 21, fp32: 53 } }
 } as const;
@@ -52,9 +52,10 @@ async function withDevices<R>(
   key: string,
   factory: (device: string) => Promise<any>,
   task: (model: any, device: string) => Promise<R>,
-  progress: Progress
+  progress: Progress,
+  only?: string[]
 ): Promise<R> {
-  const devices = ((await hasWebGPU()) ? ['webgpu', 'wasm'] : ['wasm']).filter((d) => !brokenDevices.has(d));
+  const devices = (only ?? ((await hasWebGPU()) ? ['webgpu', 'wasm'] : ['wasm'])).filter((d) => !brokenDevices.has(`${key}:${d}`));
   let lastErr: unknown = new Error('No usable device for on-device AI');
   for (const device of devices) {
     const cacheKey = `${key}:${device}`;
@@ -67,7 +68,7 @@ async function withDevices<R>(
     } catch (err) {
       lastErr = err;
       cache.delete(cacheKey);
-      brokenDevices.add(device);
+      brokenDevices.add(cacheKey);
       progress({ stage: `${device === 'webgpu' ? 'GPU' : 'CPU'} failed, retrying`, device });
     }
   }
@@ -100,27 +101,23 @@ function toRawRGB(T: any, img: RGBAImage, x = 0, y = 0, w = img.width, h = img.h
 async function removeBackground(img: RGBAImage, progress: Progress): Promise<{ image: RGBAImage; device: string }> {
   const T = await lib();
   const id = LOCAL_MODELS.removeBackground.id;
+  // Quantized CPU build: ~44 MB and reliable on any desktop browser (BiRefNet ran out of memory).
   return withDevices(
     'bg',
-    async (dev) => {
-      const model = await T.AutoModel.from_pretrained(id, { device: dev, dtype: 'fp32', progress_callback: progressCallback(progress) });
-      const processor = await T.AutoProcessor.from_pretrained(id);
-      return { model, processor };
-    },
-    async (value, device) => {
-      progress({ stage: `Removing background (${device === 'webgpu' ? 'GPU' : 'CPU'})`, device });
-      const { pixel_values } = await value.processor(toRawRGB(T, img));
-      const inputName = value.model.sessions?.model?.inputNames?.[0] ?? 'input_image';
-      const out = await value.model({ [inputName]: pixel_values });
-      const tensor = out[Object.keys(out)[0]][0];
-      const mask = await T.RawImage.fromTensor(tensor.sigmoid().mul(255).to('uint8')).resize(img.width, img.height);
+    (dev) => T.pipeline('background-removal', id, { device: dev, dtype: 'uint8', progress_callback: progressCallback(progress) }),
+    async (segmenter, device) => {
+      progress({ stage: 'Removing background (CPU, ~10–30 s)', device });
+      const out = await segmenter(toRawRGB(T, img));
+      let r = Array.isArray(out) ? out[0] : out;
+      if (r.width !== img.width || r.height !== img.height) r = await r.resize(img.width, img.height);
       const data = new Uint8ClampedArray(img.data);
       for (let i = 0, n = img.width * img.height; i < n; i++) {
-        data[i * 4 + 3] = Math.min(img.data[i * 4 + 3], mask.data[i * mask.channels]);
+        data[i * 4 + 3] = Math.min(img.data[i * 4 + 3], r.data[i * r.channels + (r.channels - 1)]);
       }
       return { image: { width: img.width, height: img.height, data }, device };
     },
-    progress
+    progress,
+    ['wasm']
   );
 }
 

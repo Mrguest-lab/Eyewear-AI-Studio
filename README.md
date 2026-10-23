@@ -14,7 +14,7 @@ marketplace presets with validation, JPG/PNG/WebP conversion, batch SKU processi
 | Enhance (levels, denoise, clarity, sharpen), white background, dust removal, contact shadow | Browser | Free |
 | Quality & marketplace validation, editable presets | Browser | Free |
 | **AI super-resolution (Swin2SR ×2/×4)** | Browser, on-device (WebGPU or WebAssembly) | Free — one-time model download 21–54 MB |
-| **AI background removal (BiRefNet-lite, MIT)** | Browser, on-device | Free — one-time model download ~224 MB |
+| **AI background removal (ormbg, Apache-2.0)** | Browser, on-device | Free — one-time model download ~44 MB |
 | AI model photoshoots, AI relight, AI angle views | Your AI gateway → Gemini or Replicate FLUX Kontext | Paid per image by the provider |
 | AI super-resolution Real-ESRGAN, AI background remover | Your AI gateway → Replicate | Paid per run |
 

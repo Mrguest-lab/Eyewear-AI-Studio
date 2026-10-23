@@ -108,7 +108,7 @@ export const SettingsTab: React.FC<TabProps> = () => {
       <Panel title="What runs where" className="lg:col-span-2">
         <ul className="text-xs text-[#ececec]/70 space-y-1.5 list-disc pl-5">
           <li><b>Free, in your browser:</b> JPG/PNG/WebP conversion, resizing, Lanczos upscaling, cropping/padding, compression, enhancement, white-background cleanup, dust removal, shadows, validation, batch and ZIP. Nothing is uploaded.</li>
-          <li><b>Free on-device AI:</b> AI upscaling (Swin2SR) and AI background removal (BiRefNet-lite) run on your own GPU/CPU. The model downloads once (21–224 MB) and is cached.</li>
+          <li><b>Free on-device AI:</b> AI upscaling (Swin2SR) and AI background removal (ormbg) run on your own GPU/CPU. Each model downloads once (21–54 MB) and is cached.</li>
           <li><b>External AI (Gemini or Replicate):</b> AI model photoshoots, AI relighting and AI angle views. Images are sent to the provider. Google bills per generated image unless your account's free quota covers it — check ai.google.dev/pricing.</li>
           <li><b>Watermarks:</b> this app never adds a watermark, logo, text, border or badge. Gemini outputs carry Google's invisible SynthID watermark; the app asks for consent and does not try to remove it.</li>
           <li><b>Hardware:</b> 4K exports need ~150–250 MB RAM per image; iPhone/iPad Safari cannot create canvases above ~16.7 MP (e.g. 4096×5120). On-device AI is fastest in Chrome/Edge with WebGPU.</li>
