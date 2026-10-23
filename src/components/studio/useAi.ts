@@ -20,7 +20,7 @@ export function useAi() {
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    const key = settings.backendUrl + '|' + settings.accessToken;
+    const key = JSON.stringify(settings);
     try {
       const { providers } = await fetchProviders(settings);
       cache = { key, providers, error: null };
@@ -33,7 +33,7 @@ export function useAi() {
   }, []);
 
   useEffect(() => {
-    const key = settings.backendUrl + '|' + settings.accessToken;
+    const key = JSON.stringify(settings);
     if (!cache || cache.key !== key) void refresh();
   }, [refresh]);
 

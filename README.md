@@ -1,9 +1,9 @@
-# ResizerHub · Eyewear AI Studio
+# Eyewear AI Studio (ResizerHub)
 
 Watermark-free e-commerce images for sunglasses and eyewear: product clean-up, true 2K/4K output,
 marketplace presets with validation, JPG/PNG/WebP conversion, batch SKU processing and AI model photoshoots.
 
-**Live app:** https://mrguest-lab.github.io/Image-Resizer/  ·  **Self-test:** https://mrguest-lab.github.io/Image-Resizer/selftest.html
+**Live app:** https://mrguest-lab.github.io/Eyewear-AI-Studio/  ·  **Self-test:** https://mrguest-lab.github.io/Eyewear-AI-Studio/selftest.html
 
 ## What runs where
 
@@ -74,7 +74,7 @@ to GitHub Pages. Other branches run the tests and build only.
 
 1. Repo **Settings → Pages → Source: GitHub Actions** (or the `gh-pages` branch).
 2. `git push origin main`
-3. Open https://mrguest-lab.github.io/Image-Resizer/
+3. Open https://mrguest-lab.github.io/Eyewear-AI-Studio/
 
 ## Limits to know
 

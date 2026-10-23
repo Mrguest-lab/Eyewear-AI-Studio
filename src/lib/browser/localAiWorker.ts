@@ -41,23 +41,38 @@ async function hasWebGPU(): Promise<boolean> {
 
 type Progress = (p: { stage: string; loaded?: number; total?: number; device?: string }) => void;
 
-/** Load a model, preferring WebGPU and falling back to WebAssembly if WebGPU fails. */
-async function load(key: string, factory: (device: string) => Promise<any>, progress: Progress): Promise<{ value: any; device: string }> {
-  if (cache.has(key)) return cache.get(key);
-  const devices = (await hasWebGPU()) ? ['webgpu', 'wasm'] : ['wasm'];
-  let lastErr: unknown;
+/** Devices that failed once (load or inference) are not retried in this session. */
+const brokenDevices = new Set<string>();
+
+/**
+ * Run a task with WebGPU first, then WebAssembly. If loading OR inference fails on a
+ * device (some GPUs/drivers fail at run time), the model is reloaded on the next device.
+ */
+async function withDevices<R>(
+  key: string,
+  factory: (device: string) => Promise<any>,
+  task: (model: any, device: string) => Promise<R>,
+  progress: Progress
+): Promise<R> {
+  const devices = ((await hasWebGPU()) ? ['webgpu', 'wasm'] : ['wasm']).filter((d) => !brokenDevices.has(d));
+  let lastErr: unknown = new Error('No usable device for on-device AI');
   for (const device of devices) {
+    const cacheKey = `${key}:${device}`;
     try {
-      progress({ stage: `Loading model (${device === 'webgpu' ? 'GPU' : 'CPU'})`, device });
-      const value = await factory(device);
-      const entry = { value, device };
-      cache.set(key, entry);
-      return entry;
+      if (!cache.has(cacheKey)) {
+        progress({ stage: `Loading model (${device === 'webgpu' ? 'GPU' : 'CPU'})`, device });
+        cache.set(cacheKey, await factory(device));
+      }
+      return await task(cache.get(cacheKey), device);
     } catch (err) {
       lastErr = err;
+      cache.delete(cacheKey);
+      brokenDevices.add(device);
+      progress({ stage: `${device === 'webgpu' ? 'GPU' : 'CPU'} failed, retrying`, device });
     }
   }
-  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+  const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+  throw new Error(`On-device AI failed (${/^\d+$/.test(msg) ? 'out of memory or unsupported device' : msg}). Try a smaller image or Chrome/Edge on a desktop.`);
 }
 
 function progressCallback(progress: Progress) {
@@ -85,35 +100,42 @@ function toRawRGB(T: any, img: RGBAImage, x = 0, y = 0, w = img.width, h = img.h
 async function removeBackground(img: RGBAImage, progress: Progress): Promise<{ image: RGBAImage; device: string }> {
   const T = await lib();
   const id = LOCAL_MODELS.removeBackground.id;
-  const { value, device } = await load(
+  return withDevices(
     'bg',
     async (dev) => {
       const model = await T.AutoModel.from_pretrained(id, { device: dev, dtype: 'fp32', progress_callback: progressCallback(progress) });
       const processor = await T.AutoProcessor.from_pretrained(id);
       return { model, processor };
     },
+    async (value, device) => {
+      progress({ stage: `Removing background (${device === 'webgpu' ? 'GPU' : 'CPU'})`, device });
+      const { pixel_values } = await value.processor(toRawRGB(T, img));
+      const inputName = value.model.sessions?.model?.inputNames?.[0] ?? 'input_image';
+      const out = await value.model({ [inputName]: pixel_values });
+      const tensor = out[Object.keys(out)[0]][0];
+      const mask = await T.RawImage.fromTensor(tensor.sigmoid().mul(255).to('uint8')).resize(img.width, img.height);
+      const data = new Uint8ClampedArray(img.data);
+      for (let i = 0, n = img.width * img.height; i < n; i++) {
+        data[i * 4 + 3] = Math.min(img.data[i * 4 + 3], mask.data[i * mask.channels]);
+      }
+      return { image: { width: img.width, height: img.height, data }, device };
+    },
     progress
   );
-  progress({ stage: 'Removing background', device });
-  const { pixel_values } = await value.processor(toRawRGB(T, img));
-  const out = await value.model({ input_image: pixel_values });
-  const tensor = out[Object.keys(out)[0]][0];
-  const mask = await T.RawImage.fromTensor(tensor.sigmoid().mul(255).to('uint8')).resize(img.width, img.height);
-  const data = new Uint8ClampedArray(img.data);
-  for (let i = 0, n = img.width * img.height; i < n; i++) {
-    data[i * 4 + 3] = Math.min(img.data[i * 4 + 3], mask.data[i * mask.channels]);
-  }
-  return { image: { width: img.width, height: img.height, data }, device };
 }
 
 async function upscale(img: RGBAImage, scale: 2 | 4, progress: Progress): Promise<{ image: RGBAImage; device: string }> {
   const T = await lib();
   const id = scale === 2 ? LOCAL_MODELS.upscale2.id : LOCAL_MODELS.upscale4.id;
-  const { value: pipe, device } = await load(
+  return withDevices(
     `sr${scale}`,
     (dev) => T.pipeline('image-to-image', id, { device: dev, dtype: dev === 'webgpu' ? 'fp32' : 'q8', progress_callback: progressCallback(progress) }),
+    (pipe, device) => upscaleTiles(T, pipe, device, img, scale, progress),
     progress
   );
+}
+
+async function upscaleTiles(T: any, pipe: any, device: string, img: RGBAImage, scale: 2 | 4, progress: Progress): Promise<{ image: RGBAImage; device: string }> {
   // Process in overlapping tiles to bound memory; stitch only each tile's centre.
   const tile = 192;
   const pad = 12;
@@ -133,6 +155,9 @@ async function upscale(img: RGBAImage, scale: 2 | 4, progress: Progress): Promis
       const result = await pipe(toRawRGB(T, img, sx, sy, ex - sx, ey - sy));
       const r = Array.isArray(result) ? result[0] : result;
       const ch = r.channels;
+      if (r.width < (ex - sx) * scale || r.height < (ey - sy) * scale) {
+        throw new Error(`Unexpected model output ${r.width}×${r.height} for a ${ex - sx}×${ey - sy} tile`);
+      }
       for (let y = y0; y < y1; y++) {
         for (let yy = 0; yy < scale; yy++) {
           const oy = y * scale + yy;
